@@ -1,0 +1,1401 @@
+---
+title             : "Examining the spoken language input to infants with cochlear implants"
+shorttitle        : "CI language input"
+
+author: 
+  - name          : "Lillianna Righter*"
+    affiliation   : "1"
+    corresponding : yes    
+    address       : "33 Kirkland St, Cambridge, MA 02138"
+    email         : "larighter@fas.harvard.edu"
+    
+  - name          : "Alex Emmert*"
+    affiliation   : "1, 2"
+
+      
+  - name          : "Erin Campbell"
+    affiliation   : "3"
+
+      
+  - name          : "Derek Houston"
+    affiliation   : "4"
+
+
+  - name          : "Elika Bergelson"
+    affiliation   : "1"
+
+affiliation:
+  - id            : "1"
+    institution   : "Department of Psychology, Harvard University, Cambridge, MA"
+
+  - id            : "2"
+    institution   : "Department of Linguistics, University of Maryland, College Park, MD"
+    
+  - id            : "3"
+    institution   : "Deaf Center, Boston University, Boston, MA"
+    
+  - id            : "4"
+    institution   : "Department of Speech, Language, and Hearing Sciences, University of Connecticut, Storrs, CT"
+
+authornote: |
+
+  *AE & LR co-first author.
+
+abstract: |
+  We examine the spoken language environments of 16 deaf and hard of hearing infants with cochlear implants (DHH), 16 hearing chronological age matches (CAM), and 16 hearing age matches (HAM), ages 14-32 months. Using manual annotations and automated LENA analyses [@xu2009], we find overall similarities in quantity of language input and the social, linguistic, conceptual, and auditory features of the language environment of each group. Caregivers use slightly longer MLU to hearing children, and use more highly auditory-associated words with DHH children. We find differences in children's vocalizations and conversational turn count, with DHH children producing fewer and less mature vocalizations and engagin in fewer conversational turns. These findings replicate prior literature and suggest that caregivers do not adapt their speech on the basis of infants' perceptual capacity. However, they likewise reinforce prior findings that the amount of linguistic input and interaction they receive is shaped by infants' own language productions. This suggests any DHH infants' difficulties with productive language outcomes 1) is not fundamentally due to differences in language input behavior from caregivers; but 2) may slow the quantity of language input and interaction that they receive. Instead, differences in language outcomes between hearing and DHH children may be driven by decreased access to and difficulty processing the language environment because of the noisy signal from a cochlear implant. Full paper forthcoming.   
+  
+header-includes: 
+- \usepackage{float} #use the 'float' package
+- \floatplacement{figure}{H} #make every figure with caption = h
+
+floatsintext      : yes
+linenumbers       : yes
+draft             : no
+mask              : no
+
+figurelist        : no
+tablelist         : no
+footnotelist      : no
+
+classoption       : "man"
+output            : papaja::apa6_pdf
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+library(tidyverse)
+library(knitr)
+library(see)
+library(morphemepiece)
+library(cowplot)
+library(ggplot2)
+library(kableExtra)
+library(tidyr)
+library(udpipe)
+library(papaja)
+library(ggpubr)
+library(unpivotr)
+library(rlang)
+library(cocor)
+library(pwr)
+
+
+r_refs("references.bib")
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+options(dplyr.summarise.inform = FALSE)
+
+data_dir <- fs::path(here::here('data'))
+```
+
+```{r chunk2, include=FALSE}
+options(tinytex.verbose = TRUE)
+```
+
+```{r functions, echo=FALSE}
+graph_label_size <- 12
+graph_label_x_angle <- 48
+getwd()
+#read in HI demographics
+HI_demographics <-read.csv(data_dir / "OSU_LENA_Triplets.csv") %>%
+  filter(!VIHI_ID == "TD_454_510", !VIHI_ID == "TD_460_531") %>%
+  mutate(across(where(is.character), ~na_if(.,"")), #Make sure numbers are represented as such
+         across(where(is.numeric), ~na_if(.,NA))) %>%
+  replace_na(list(FamilyStructure="unknown", Race="unknown", Ethnicity="unknown"))%>%
+  mutate(age_actv = (Age-HearingAge)) %>%
+  mutate(age_actv = as.numeric(age_actv))
+HI_demographics$OlderSibs <-as.character(HI_demographics$OlderSibs) %>%
+  replace_na("unknown") 
+
+#Appends triplet number and Role (CI/HAM/CAM) to any dataframe with a VIHI_ID column
+get_match_number <- function(df) { 
+  df %>%
+    left_join((HI_demographics %>% select(VIHI_ID,Triplet_num,Role,Age)), by = "VIHI_ID") %>%
+    mutate(HearingStatus = case_when(Role == "HAM" | Role == "CAM" ~ "Hearing",
+                                     Role == "CI" ~ "CI"))
+}
+
+
+signif_ints <- list(
+  cutpoints = c(0, 0.0001, 0.001, 0.01, 0.025, 1), #Using .025 since we're doing two pairwise comparisons
+  symbols = c("xxxx", "***", "**", "*", "ns")
+  )
+
+## the next function makes a boxplot comparing DHH group, chronological age match group, and hearing age match group
+make_tricomparison <- function(data, x_var, y_var, group_var, y_label, uses_hivol = FALSE, title = NULL, y_axis_start=0) {
+  ggplot(data = data, aes(x = .data[[x_var]], y = .data[[y_var]], color = .data[[group_var]], fill = .data[[group_var]])) + 
+    geom_boxplot(outliers = FALSE) +
+    geom_jitter(position=position_jitterdodge(0.1), color = 'black', size=1.5, shape=1) +
+    theme_classic() +
+    labs(y = y_label, x = NULL, title = title, element_text(size = 15)) + #gotta have big readable plot labels
+    theme(
+      legend.title = element_blank(),
+      legend.position = "none",
+      axis.text.x = element_text(angle = graph_label_x_angle, hjust = 1),
+      text = element_text(size = graph_label_size)
+    ) +
+    scale_color_manual(
+      breaks = levels(x_var),
+      labels = c("DHH (CI)", "HA Match", "CA Match"),
+      values = c("#a7d4b7", "#30815c", "#64b68d")
+    ) +
+    scale_fill_manual(
+      breaks = levels(x_var),
+      labels = c("DHH (CI)", "HA Match", "CA Match"),
+      values = c("#b7e4c7", "#40916c", "#74c69d")
+    ) +
+    stat_summary(fun.data = "mean_cl_boot", color = "#FD019B", size=.7) +
+    scale_x_discrete(labels = c("CI" = "DHH (CI)", "Hearing" = "HA Match", "CAM" = "CA Match")) +
+    coord_cartesian(ylim = c(y_axis_start, max(data[[y_var]] * 1.1))) +
+    #Add p-values / significance indication
+    ggpubr::stat_compare_means(paired=FALSE, label.y = max(data[[y_var]]*1.02), label="p.signif", comparisons=list(c("CI", "CAM"), c("CI", "Hearing")), method="t.test", size=3, symnum.args = signif_ints) 
+}
+
+##the next function makes a similar. boxplot but lumps chronological and hearing age matches into on big Hearing group and compares to DHH group
+bicomparison <- function(data, x_var = "HearingStatus", y_var, y_label, match_var="Role", uses_hivol = FALSE, title = NULL, y_axis_start=0) {
+  ggplot(data = data, aes(x = .data[[x_var]], y = .data[[y_var]], color = .data[[x_var]], fill = .data[[x_var]])) + 
+    geom_boxplot(outliers = FALSE) +
+    geom_jitter(aes(shape = .data[[match_var]]), position=position_jitterdodge(0.1), size=3, alpha = .6) +
+    theme_classic() +
+    labs(y = y_label, x = NULL, title = title, element_text(size = 15)) + 
+    theme(
+      legend.title = element_blank(),
+      legend.position = "none",
+      axis.text.x = element_text(angle = graph_label_x_angle, hjust = 1),
+      text = element_text(size = graph_label_size)
+    ) +
+    scale_color_manual(
+       breaks = levels(x_var),
+       labels = c("CI", "Hearing"),
+       values = c("#AF3447", "#B65F21")
+     ) +
+    scale_fill_manual(
+       breaks = levels(x_var),
+       labels = c("CI", "Hearing"),
+       values = c("#CE4257", "#FF9B54")
+     ) +
+    stat_summary(fun.data = "mean_cl_boot", color = "black", size=.7) +
+    coord_cartesian(ylim = c(y_axis_start, max(data[[y_var]] * 1.1))) +
+    #Add p-values / significance indication
+    ggpubr::stat_compare_means(comparisons = list(c("CI", "Hearing")), paired=FALSE, label.y = max(data[[y_var]]*1.02), label="p.signif", method="t.test", size=3, symnum.args = signif_ints) 
+}
+
+cowplot_title <- function(title_text) {
+  title <- ggdraw() + 
+    draw_label(
+      title_text,
+      fontface = 'bold',
+      x = 0,
+      hjust = 0
+    ) +
+    theme(
+      plot.margin = margin(0, 0, 0, 7)
+    )
+  return(title)
+}
+
+##this function plots 
+make_agegroup_plot <- function(data, x_var="Age", y_var, group_var="HearingStatus", y_label, uses_hivol = FALSE, title = NULL, y_axis_start=0) {
+  hearing_colors <- c("CI" = "#CE4257", "Hearing" = "#FF9B54")
+  ggplot(data = data, aes(x = .data[[x_var]], y = .data[[y_var]], color = .data[[group_var]], fill = .data[[group_var]])) + 
+    geom_point(size = 3, aes(shape = .data[["Role"]], 
+                              color = .data[[group_var]], fill = .data[[group_var]]
+                             )) +
+    scale_color_manual(values = hearing_colors)+
+  scale_fill_manual(values = hearing_colors) +
+    geom_smooth(method="lm")+
+    labs(y = y_label, x = "Chronological Age\n(months)", title = title, element_text(size = 6)) +
+    theme(
+      axis.text.x = element_text(angle = graph_label_x_angle, hjust = 1),
+      text = element_text(size = graph_label_size)
+    ) +
+    theme_classic() +
+    coord_cartesian(ylim = c(y_axis_start, max(data[[y_var]] * 1.1))) +
+    stat_cor(color = c("#870611", "#C25C18"), position="dodge")
+}
+
+```
+
+```{r data, echo=FALSE, }
+#read in manual ACLEW transcriptions from whole corpus
+unwrangled_HI_LENA <- read.csv(file= data_dir / "HI_LENA_and_TD_matches_2025-01-24.csv")
+
+cleaned_input_utts <- unwrangled_HI_LENA %>%
+  mutate(VIHI_ID = substr(VIHI_ID, 1, 10)) %>% #Clip off the ".eaf" so that it'll match with the demographics file
+  get_match_number() %>% #Get triplet and CI/HA/CA from demographics file
+  filter(!is.na(Role)) %>% #If there's no role, the speaker is not a CI/HA/CA kid. They're probably a TD VI match inadvertently included here
+  filter(speaker != "EE1", speaker != "CHI") %>% # remove CHI utts and electronic speech since we're looking at input set
+  mutate(
+      utterance_clean = str_replace_all(utterance, "&=\\w+", ""), # Remove substrings starting with &=, since these are nonlinguistic
+      utterance_clean = str_replace_all(utterance_clean, "@c", ""), #Remove the "@c" at the ends of made-up words
+      utterance_clean = str_replace_all(utterance_clean, "<.*>\\s?\\[:\\s?(.*)\\]", "\\1"), #Replace "<cuz> [: because]" with "because" (e.g. dictionary form rather than stylized transcription)
+      utterance_clean = str_replace_all(utterance_clean, "<(.*)>\\s?\\[=!\\s?.*\\]", "\\1"), #Replace "<lala> [=! sings]" with "lala"
+      utterance_clean = str_replace_all(utterance_clean, "\\[-\\s[a-z]{3}\\]", ""), # Remove language tags like "[- spa]" or "[- ger]" that denote other languages
+      utterance_clean = str_replace_all(utterance_clean, "[[:punct:]&&[^']]", ""), # Remove any punctuation, except for apostrophes
+      utterance_clean = str_replace_all(utterance_clean, "xxx", ""), # Remove "xxx" unintelligible segments
+      utterance_clean = str_replace_all(utterance_clean, "\\s+$", "") # Remove trailing whitespace
+    ) %>%
+  filter(utterance_clean != "")
+
+chi_outcomes <- unwrangled_HI_LENA %>%
+  mutate(VIHI_ID = substr(VIHI_ID, 1, 10)) %>% #Clip off the ".eaf" so that it'll match with the demographics file
+  get_match_number() %>% #Get triplet and CI/HA/CA from demographics file
+  filter(!is.na(Role)) %>% #If there's no role, the speaker is not a CI/HA/CA kid. They're probably a TD VI match inadvertently included here
+  filter(speaker=="CHI") %>% #pull out only CHI speech so we can caluclate prop vcm
+  filter(!is.na(vcm))
+
+chi_babbling_props <- chi_outcomes %>%
+  group_by(group, VIHI_ID) %>%
+  summarise( #calculate proportions of the child's utterances by vocal maturity, a closed set of annotation values: C = canonical syllables, N = noncanonical sounds, Y = crying, L= laughter, U = unsure
+    total = n(), 
+    prop_canonical = sum(vcm == "C") / total,
+    prop_noncanonical = sum(vcm == "N") / total,
+    prop_other_voc = sum(vcm == "Y" & vcm =="L" & vcm == "U") / total
+  ) %>%
+get_match_number() 
+
+chi_lexical_props <-chi_outcomes %>% ##calculate the proportion of the child's utterances that were coded to contain lexical items, W= words, 0 = zero words
+  mutate(lex = replace_na(lex,"0")) %>%
+  group_by(group, VIHI_ID) %>%
+  summarise(
+    total = n(),
+    prop_lexical = sum(lex == "W") / total,
+    prop_prelex = sum(lex=="0") / total
+  )
+#read in LENA automated measures from raw its files. need to regenerate VIHI_its_details.csv bc it's missing a couple files but that is a separate problem
+HI_LENA_counts <-
+  read.csv(data_dir / "VIHI_its_details.csv") %>%
+  filter(match_type == "HI" | match_type == "HI_age" | match_type == "HI_hearingage") %>% # only look at data from HI kids or their TD matches
+  filter(!VIHI_ID == "TD_436_678", !VIHI_ID == "TD_441_732", !VIHI_ID == "TD_459_188")  %>%  #excludes TD matches that we eventually changed
+  mutate(
+    AWC_per_hour = AWC / (total_time_dur / 3600), # change Adult Word Count to be per hour, for normalization across varying durations
+    CTC_per_hour = CTC / (total_time_dur / 3600), # change Conversational Turn Count to be per hour
+    CVC_per_hour = CVC/ (total_time_dur / 3600), # change Child Vocalization Count to be per hour
+    TVN_prop = TVN_dur / total_time_dur, #Proportion of tv/media
+    NON_prop = NON_dur / total_time_dur, #Proportion of nonspeech noise
+    OLN_prop = OLN_dur / total_time_dur #Proportion of overlapping noise
+  ) %>%
+  get_match_number() %>% # add a column that indicates which triplet each child is a member of
+  distinct(its_path, .keep_all = TRUE) #spreadsheet has some duplicate its info
+write_csv(HI_LENA_counts, data_dir / "HI_LENA_counts.csv")
+
+HITD_LENA_utterances_split <- cleaned_input_utts %>%
+  rename(Word = utterance_clean) %>%
+  separate_wider_delim(
+    Word,
+    delim = ' ',
+    too_few = 'align_start',
+    too_many = 'error',
+    names_sep = '')
+
+HITD_LENA_words <- HITD_LENA_utterances_split %>%
+  mutate(utt_num = seq(1, nrow(HITD_LENA_utterances_split), 1)) %>% #give each utterance a unique number
+  pivot_longer(cols = starts_with('Word'),
+               #pivot the word columns into a single Word column
+               names_to = "utt_loc",
+               #create another column that gives the location within utterance (ex:Word2)
+               values_to = "Word") %>%
+  dplyr::select(VIHI_ID,
+                group,
+                speaker,
+                sampling_type,
+                xds,
+                utt_num,
+                utt_loc,
+                Word) %>%
+  filter(!is.na(Word)) %>% #filter out blank rows
+  filter(group != "VI" & speaker != "CHI" & Word != "")
+
+
+#Total number of manual word tokens
+manual_word_tokens <- HITD_LENA_words %>%
+  filter(sampling_type == "random") %>% # for quantity measures, we're only looking at random samples (15 from each file, 2 minutes each)
+  group_by(VIHI_ID) %>%
+  summarise(tokens = n(),# count # of rows, grouped by child. each row is 1 word, so this should give us the token count.
+            MWC_per_hour = tokens*2) %>% #since this is over 30 minutes of annotation, we multiply by 2 to get words/hour
+  select(VIHI_ID, tokens, MWC_per_hour) %>%
+  get_match_number() %>% # add pair info
+  mutate(group = as.factor(str_sub(VIHI_ID, 1, 2))) # add group (determined by VIHI_ID)
+
+#CDS Manual word tokens
+CDS_manual_word_tokens <- HITD_LENA_words %>%
+  filter(sampling_type == "random") %>% # for quantity measures, we're only looking at random samples
+  filter(xds == "C") %>%
+  group_by(VIHI_ID) %>%
+  summarise(tokens = n(),# count # of rows, grouped by child. each row is 1 word, so this should give us the token count.
+            MWC_per_hour = tokens*2) %>% #since this is over 30 minutes, we multiply by 2 to get words/hour
+  select(VIHI_ID, tokens, MWC_per_hour) %>%
+  get_match_number() %>% # add pair info
+  mutate(group = as.factor(str_sub(VIHI_ID, 1, 2))) # add group (determined by VIHI_ID)
+
+##create a data frame that will allow us to look at the effect of input quantity on child language outcomes
+adult_baby_manual_quant <- manual_word_tokens %>%
+  select(VIHI_ID,tokens,MWC_per_hour) %>%
+  left_join(chi_babbling_props, by = 'VIHI_ID') %>%
+  select(VIHI_ID, tokens, MWC_per_hour,prop_canonical, prop_noncanonical, prop_other_voc, Role, HearingStatus,Age) %>%
+  left_join(chi_lexical_props, by = 'VIHI_ID')
+```
+
+# Methods
+
+All interaction with human subjects, data collection, and storage procedures were conducted in accordance with the guides laid out in the Declaration of Helsinki. All activities were approved by Institutional Review Boards at Duke University, the Ohio State University, or Harvard University.
+
+## Participants
+
+A total of `r HI_demographics %>% filter(Role=="CI") %>% nrow()` deaf/hard-of-hearing (DHH) children with cochlear implants contributed recordings during a larger study conducted at the Ohio State University [for general results about the larger sample, see @wang2022]. All DHH children in this sample experience bilateral severe-to-profound hearing loss, use bilateral cochlear implants (age at first activation `r HI_demographics %>% filter(Role=="CI") %>% with(min(age_actv))`-`r HI_demographics %>% filter(Role=="CI") %>% with(max(age_actv))` months, M = `r HI_demographics %>% filter(Role=="CI") %>% with(mean(age_actv))` months), and are acquiring spoken English as the target language; minimal to no sign language exposure was reported.
+
+```{r demo-prep, echo=FALSE}
+##preparing to report demographic data in a table
+
+gender_break <-HI_demographics %>%
+  mutate(Gender = recode(Gender, "female" = "Female", "male" = "Male"))  %>%
+  mutate(Gender = factor(Gender,levels=c("Female","Male")))%>%
+    group_by(Role, Gender) %>% 
+  summarise(perc = (n()/16)*100) %>%
+  mutate(Gender = paste0(Gender," ", perc, "%")) %>%
+  select(!perc) %>%
+  mutate(ordinal = row_number()) %>%
+  mutate(Role = as.character(Role)) %>%
+  group_by(Role) %>%
+  pivot_wider(names_from = Role, values_from = Gender) %>%
+  select(!ordinal)
+
+Race_break <-HI_demographics %>%
+  mutate(Race2 = recode(Race, "Asian,White" = "Multiple races", "unknown" = "Unreported","Mixed"="Multiple races"))  %>%
+           mutate(Race = factor(Race2,levels=c("White","Multiple races","Unreported")))%>%
+    group_by(Role, Race) %>% 
+  summarise(perc = (n()/16)*100)%>%
+  mutate(Race = paste0(Race," ", perc, "%")) %>%
+  select(!perc) %>%
+  mutate(ordinal = row_number()) %>%
+  mutate(Role = as.character(Role)) %>%
+  group_by(Role) %>%
+  pivot_wider(names_from = Role, values_from = Race) %>%
+  select(!ordinal)
+
+MatEd_break <-HI_demographics %>%
+  mutate(MatEd = recode(MatEd, "Associates" = "Associate's degree", "HSD" = "High school diploma", "Bachelors" = "Bachelor's degree", "Graduate" = "Advanced degree", "SomeCollege" = "Some college", "Professional" = "Professional certification", "LessThanHS" = "Less than high school"))%>%
+  mutate(MatEd = factor(MatEd,levels=c("Less than high school","High school diploma","Some college","Associate's degree","Professional certification", "Bachelor's degree","Advanced degree")))%>%
+  group_by(Role, MatEd) %>% 
+  summarise(perc = (n()/16)*100) %>%
+  mutate(MatEd = paste0(MatEd," ", perc, "%")) %>%
+  select(!perc) %>%
+  mutate(ordinal = row_number()) %>%
+  mutate(Role = as.character(Role)) %>%
+  pivot_wider(names_from = Role, values_from = MatEd) %>%
+  select(!ordinal)
+
+Ethnicitable <- HI_demographics %>%
+  mutate(Ethnicity = recode(Ethnicity, "unknown" = "Unreported"))%>%
+  mutate(Ethnicity = factor(Ethnicity,levels=c("Hispanic or Latino", "Not Hispanic or Latino", "Unreported")))%>%
+  group_by(Role, Ethnicity) %>% 
+  summarise(perc = (n()/16)*100) %>%
+  mutate(Ethnicity = paste0(Ethnicity," ", perc, "%")) %>%
+  select(!perc) %>%
+  mutate(ordinal = row_number()) %>%
+  mutate(Role = as.character(Role)) %>%
+  group_by(Role) %>%
+  pivot_wider(names_from = Role, values_from = Ethnicity) %>%
+  select(!ordinal)
+
+Age_breaks <- HI_demographics %>%
+  group_by(Role) %>%
+  summarise(Average = mean(Age),
+            From = min(Age),
+            To = max(Age)) %>%
+  mutate(Range = paste0(From," to ",To, " mo.")) %>%
+  mutate(Age = paste0("M = ", round(Average, digits = 1), " mo.", ", ", Range)) %>%
+  select(Role, Age)%>%
+  pivot_wider(names_from = Role, values_from = Age)
+
+Age_activ_breaks <- HI_demographics %>%
+  filter(Role == "CI") %>%
+  group_by(Role) %>%
+  summarise(Average = mean(age_actv),
+            From = min(age_actv),
+            To = max(age_actv)) %>%
+  mutate(Range = paste0(From," to ",To, " mo.")) %>%
+  mutate(Age_activation = paste0("M = ", round(Average, digits = 1), " mo.", ", ", Range)) %>%
+  select(Role, Age_activation)%>%
+  pivot_wider(names_from = Role, values_from = Age_activation) %>%
+  add_column(CAM = NA, HAM = NA) %>%
+  relocate(CAM, .before = CI) 
+
+Hearing_age_breaks <- HI_demographics %>%
+  group_by(Role) %>%
+  summarise(Average = mean(HearingAge),
+            From = min(HearingAge),
+            To = max(HearingAge))%>%
+  mutate(Range = paste0(From," to ",To, " mo.")) %>%
+  mutate(Age_hrng = paste0("M = ", round(Average, digits = 1), " mo.", ", ", Range)) %>%
+  select(Role, Age_hrng)%>%
+  pivot_wider(names_from = Role, values_from = Age_hrng)
+
+rowzz <- c("Age", "Hearing age", "Age at first activation", "Gender", "Maternal education level", "Race", "Ethnicity")
+
+demographics_tab <-Age_breaks %>%
+  rbind.data.frame(Hearing_age_breaks,Age_activ_breaks, gender_break,MatEd_break,Race_break,Ethnicitable) %>%
+  mutate_all(funs(replace_na(., "")))
+```
+
+```{r demo-table, echo=FALSE, out.width="75%", fig.pos='h'}
+#outputting table
+demo <-demographics_tab %>%
+  kable(caption= "Demographic information by group, n = 16 per group.",valign = "t") %>%
+  group_rows("Age", 1,1) %>%
+  group_rows("Hearing Age", 2,2) %>%
+  group_rows("Age at first activation", 3,3) %>%
+  group_rows("Gender", 4,5) %>%
+  group_rows("Maternal education level", 6,12) %>%
+  group_rows("Race", 13,15) %>%
+  group_rows("Ethnicity", 16,18) %>%
+  kable_styling(full_width = FALSE, latex_options = c("HOLD_position","scale_down"))
+demo
+
+```
+
+Each DHH child was matched with two typically-hearing children: one based on chronological age (CA) and one based on hearing age (HA). Hearing age was operationalized as the amount of time that children had auditory access to spoken English. For typically-hearing children, this is the same as chronological age, as they have had access to sound from birth. For DHH children, this is the amount of time since activation of their first CI, or in other words their age at the time of recording minus their age at activation. As a result, HA matches are younger than DHH children and their CA matches by design.
+
+Recordings from typically-hearing children were gathered from preexisting English-speaking corpora or collected from the Durham, North Carolina area. Typically-hearing children were monolingual English learners (parents reported that at least 75% of children's language input was spoken English), and were matched to DHH children based on infant sex, maternal education (within one level), and number of older siblings (none, one, two, or 3 or more; twins were matched to twins). The age matching guidelines were based on the age or hearing age being matched: under twelve months, the control infant's age was within +/- 2 weeks; between 12 and 24 months the control infant's age fell within +/- 1 month of the DHH child's age; and over 24 months, the infant's age was within +/- 2 months difference. The full distribution of demographic factors can be found in Table \@ref(tab:demo-table).
+
+## Data collection
+
+Each child contributed one day-long recording (`r HI_LENA_counts %>% nrow()` recordings, mean duration = `r mean(HI_LENA_counts$total_time_dur)/3600` hours) using LENA devices [@gilkerson2008; @ganek2016; @zimmerman2009]. Parents were instructed to start the recording when the child woke up and to keep it nearby when the vest had to be removed (e.g. for baths or naps). Parents received instructions for pausing and resuming recordings in the case of private conversations, and were given the option to have any part of the recording deleted after data collection and not analyzed, if they chose.
+
+## Data analysis
+
+Each recording was algorithmically analyzed in its entirety by LENA software [@xu2009], and a portion of each recording was further transcribed and annotated by trained annotators using ELAN (versions 5.7- 6.8; [@brugman2009; @sloetjes2008]). Fifteen two-minute intervals were extracted randomly in each recording for hand annotation, in addition to five "high-volubility" two-minute intervals containing dense speech, as identified by the voice type classifier for child-centered daylong recordings [@lavechin]. This resulted in 20 two-minute intervals, for a total manual annotation time of 40 minutes per recording. Annotators listened to, but did not annotate, the preceding two minutes and following one minute of each segment's audio to establish context.
+
+Manual annotation was performed in accordance with the ACLEW annotation scheme [@soderstrom2021], with speech by individuals other than the target child transcribed using the minCHAT transcription style [@macwhinney2019]. Each non-target-child utterance was classified based on the role of the addressee (child, adult, both child and adult, pet, other, or unknown) and lexically transcribed. The target child's vocalizations were annotated for maturity (non-canonical babbling, canonical babbling, laughter, crying) and lexicality (contains words, single- or multi-word utterance). 30 annotators contributed to this data set over 6 years. We conducted a 10% recode on the closed-set coding categories to assess inter-coder reliability; agreement was 90.6%, Cohen's kappa 0.88, indicating high consistency.
+
+To maximize statistical power given our relatively small sample, we combine the two hearing groups into a single comparison group---unless the two hearing groups differ across age for a given variable. First, we check within the typically-hearing group whether the input variable differs as a function of age, to establish whether we should expect an effect of age on the input variable. That guides our choice of test: if the variable differs across age in typically-hearing children, we run a linear model testing whether the input variable differs by child hearing status while controlling for age (Input Variable \~ Group\~Cochlear Implant vs. Typically-Hearing\~ + Age). If the input variable *does not* differ across age in typically-hearing children, to conserve power, we combine the hearing age match and chronological age match groups and run a t-test comparing the input variable by hearing status (Input Variable \~ Group\~Cochlear Implant vs. Typically-Hearing\~).This approach allows us to simplify to a two-group comparison when possible, while preserving the careful demographic matching of both hearing age and chronological age.
+
+```{r stats-reporting, echo=FALSE}
+
+check_age_correlation <- function(df, variable_col) {
+  hearing_only <- df %>% filter(Role %in% c("HAM", "CAM"))
+  
+  cor_result <- cor.test(hearing_only[[variable_col]], hearing_only$Age)
+  
+  r_value <- round(cor_result$estimate, 2)
+  p_value <- printp(cor_result$p.value, add_equals = TRUE)
+
+  result_string <- glue::glue("r = {r_value}, *p* {p_value}")
+  
+  return(result_string)
+}
+
+
+report_group_means <- function(df, variable_col, target_group, needs_label = TRUE, digits=2) {
+  # Check if the group exists in the column
+  if (!(target_group %in% df[["HearingStatus"]])) {
+    stop("Group not found in the data.")
+  }
+  
+  mean_value <- df %>%
+    filter(HearingStatus == target_group) %>%
+    summarize(mean = mean(.data[[variable_col]], na.rm = TRUE)) %>%
+    pull(mean)
+  
+  if (needs_label == TRUE) {
+    output <- paste("Mean~", target_group, "~=", round(mean_value, digits), sep = "")
+  } else {
+    output <- round(mean_value, digits)
+  }
+  
+  return(output)
+}
+
+report_kruskal <- function(df, variable_col, group_col = "Role") {
+
+    kruskal_results <- kruskal.test(df[[variable_col]], df[[group_col]])
+  
+  test_statistic <- kruskal_results$statistic
+  p_value <- kruskal_results$p.value
+  
+  output <- paste("H = ", 
+                  round(test_statistic, 2), 
+                  ", *p* ", 
+                  papaja::printp(p_value, add_equals = TRUE), 
+                  sep = "")
+  
+  return(output)
+}
+
+report_wilcox <- function(df, variable_col, group_col = "HearingStatus") {
+  # Ensure group column is a factor
+  df[[group_col]] <- as.factor(df[[group_col]])
+
+  # Construct formula dynamically
+  formula <- reformulate(group_col, response = variable_col)
+
+  # Run Wilcoxon test
+  wilcox_results <- wilcox.test(formula, data = df)
+
+  # Extract test statistic and p-value
+  test_statistic <- wilcox_results$statistic
+  p_value <- wilcox_results$p.value
+
+  # Format output for R Markdown
+  output <- paste0("W = ", 
+                   round(test_statistic, 2), 
+                   ", *p* ", 
+                   papaja::printp(p_value, add_equals = TRUE))
+ 
+  return(output)
+}
+
+
+report_lm <- function(df, variable_col, report_type = "all") {
+  # Fit the linear model with interaction
+  lm_model <- lm(as.formula(paste(variable_col, "~ HearingStatus * Age")), data = df)
+  lm_summary <- summary(lm_model)
+  
+  # Extract coefficient names
+  coef_names <- rownames(lm_summary$coefficients)
+  
+  output <- ""
+
+  # Model-level statistics
+  if (report_type == "model" || report_type == "all") {
+    r_squared <- lm_summary$r.squared
+    f_value_model <- lm_summary$fstatistic[1]
+    p_value_model <- pf(f_value_model, lm_summary$fstatistic[2], lm_summary$fstatistic[3], lower.tail = FALSE)
+    
+    output <- paste(output, "Model R² = ", round(r_squared, 2), ", *p* ", papaja::printp(p_value_model, add_equals = TRUE), sep = "")
+  }
+  
+  # Group effect (HearingStatus)
+  if (report_type == "group" || report_type == "all") {
+    hearing_coef_name <- coef_names[grepl("^HearingStatus", coef_names) & !grepl(":", coef_names)]
+    
+    if (length(hearing_coef_name) > 0) {
+      group_coef <- lm_summary$coefficients[hearing_coef_name, "Estimate"]
+      group_p <- lm_summary$coefficients[hearing_coef_name, "Pr(>|t|)"]
+      
+      output <- paste(output, ", Beta~HearingStatus~ = ", round(group_coef, 2), ", *p* ", papaja::printp(group_p, add_equals = TRUE), sep = "")
+    } else {
+      output <- paste(output, "(HearingStatus not included in model)")
+    }
+  }
+  
+  # Age effect
+  if (report_type == "age" || report_type == "all") {
+    if ("Age" %in% coef_names) {
+      age_coef <- lm_summary$coefficients["Age", "Estimate"]
+      age_p <- lm_summary$coefficients["Age", "Pr(>|t|)"]
+      
+      output <- paste(output, ", Beta~Age~ = ", round(age_coef, 2), ", *p* ", papaja::printp(age_p, add_equals = TRUE), sep = "")
+    } else {
+      output <- paste(output, "(Age not included in model)")
+    }
+  }
+
+  # Interaction effect (HearingStatus:Age)
+  if (report_type == "interaction" || report_type == "all") {
+    interaction_name <- coef_names[grepl("^HearingStatus.*:Age$", coef_names)]
+    
+    if (length(interaction_name) > 0) {
+      interaction_coef <- lm_summary$coefficients[interaction_name, "Estimate"]
+      interaction_p <- lm_summary$coefficients[interaction_name, "Pr(>|t|)"]
+      
+      output <- paste(output, ", Interaction: Beta~HearingStatus:Age~ = ", round(interaction_coef, 2), ", *p* ", papaja::printp(interaction_p, add_equals = TRUE), sep = "")
+    } else {
+      output <- paste(output, "(Interaction not included in model)")
+    }
+  }
+
+  return(output)
+}
+```
+
+### Automated LENA Measures
+
+The LENA software generated values for Adult Word Counts (AWC) and Conversational Turn Count (CTC) for each recording. AWC estimates the number of words produced by adults around the child, and defines a conversational turn as a pair of utterances produced by an adult speaker and a child speaker (or vice versa) occurring within within 5 seconds of each other. We normalized both of these measures to a per-hour value based on each recording's length.
+
+We used LENA software further calculated the proportions of Nonspeech Noise, Overlapping Sound, and TV/Media Noise in each recording, expressed here as a simple fraction of each recording that was identified as containing each type of noise.
+
+We first check to see whether the LENA metrics vary across age among typically-hearing participants. Adult Word Count did not vary across age (`r check_age_correlation(HI_LENA_counts, "AWC_per_hour")`), but conversational turn count (`r check_age_correlation(HI_LENA_counts, "CTC_per_hour")`) and child vocalization count (`r check_age_correlation(HI_LENA_counts, "CVC_per_hour")`) did. For adult word count, therefore, we combined the two typically-hearing groups and compared them to the CI group. Results of the Wilcoxon test showed no significant difference in overall word count between the cochlear implant group and their typically-hearing matches (`r report_group_means(HI_LENA_counts, "AWC_per_hour", "CI")`, `r report_group_means(HI_LENA_counts, "AWC_per_hour", "Hearing")`, `r report_wilcox(df = HI_LENA_counts, variable_col = "AWC_per_hour")`). For conversational turn count, we found that while conversational turn count increases across age for the typically-hearing participants, it did not increase across age for children with cochlear implants (`r report_lm(HI_LENA_counts, "CTC_per_hour", report_type = "all")`). Results were similar for child vocalization count: while child vocalization count increases across age for typically-hearing children, it did not for children with cochlear implants (`r report_lm(HI_LENA_counts, "CVC_per_hour", report_type = "all")`).
+
+```{r awc-ctc, echo=FALSE}
+
+AWC_line_plot <-make_agegroup_plot(
+  data = HI_LENA_counts,
+  y_var = "AWC_per_hour",
+  y_label = "Adult word count\n(per hour)"
+)
+
+AWC_plot <- make_tricomparison(
+  data = HI_LENA_counts,
+  x_var = "Role",
+  y_var = "AWC_per_hour",
+  group_var = "Role",
+  y_label = "Adult Word Count (per hour)"
+)
+
+#CTC Violin Plot
+CTC_plot <- make_tricomparison(
+  data = HI_LENA_counts,
+  x_var = "Role",
+  y_var = "CTC_per_hour",
+  group_var = "Role",
+  y_label = "Conversational Turn Count\n(per hour)",
+  title = NULL
+)
+
+CTC_line_plot <-make_agegroup_plot(
+  data = HI_LENA_counts,
+  y_var = "CTC_per_hour",
+  y_label = "Conversational Turn Count\n(per hour)"
+)
+
+# ae: not part of the final paper but this line is useful for debugging make_agegroup_plot
+#cowplot::plot_grid(AWC_line_plot, CTC_line_plot)
+```
+
+```{r cvc, echo=FALSE}
+#CVC violin plot
+CVC_plot <- bicomparison(
+  data = HI_LENA_counts,
+  y_var = "CVC_per_hour",
+  y_label = "Child vocalization count per hour",
+  title = NULL
+)
+
+babble_plot <- bicomparison(
+  data = adult_baby_manual_quant,
+  y_var = "prop_canonical",
+  y_label = "Prop. of \nCanonical Babbling",
+  title = NULL
+)
+```
+
+```{r xds, echo=FALSE}
+#XDS Proportions and Bar Plot
+xds_props_wide <- cleaned_input_utts %>%
+  filter(sampling_type == "random") %>% # for interaction measures, we're only looking at random samples (high-volume might overrepresent)
+  group_by(group, VIHI_ID) %>%
+  summarise( #calculate proportions by xds. 
+    total = n(), 
+    prop_ADS = sum(xds == "A") / total,
+    prop_CDS = sum(xds == "C") / total,
+    prop_BDS = sum(xds == "B") / total,
+    prop_TDS = sum(xds == "T") / total,
+    prop_ODS = sum(xds == "O") / total,
+    prop_UDS = sum(xds == "U") / total,
+    prop_PDS = sum(xds == "P") / total 
+  ) %>%
+get_match_number() 
+
+xds_props <- xds_props_wide %>%
+  pivot_longer(
+    cols = prop_ADS:prop_PDS,
+    names_to = "addressee",
+    names_prefix = "prop_",
+    values_to = "prop"
+  )
+addressee_props_plot <- xds_props %>% filter(addressee!="TDS")%>%
+  group_by(Role, addressee) %>%
+  summarise(prop = mean(prop,na.rm=TRUE)) %>%
+  ggplot(aes(x=Role,y=prop,fill=factor(addressee,levels=c("UDS","TDS","PDS","ODS","BDS","ADS","CDS")))) +
+  geom_bar(stat="identity") +
+  scale_fill_manual(name = "Addressee", breaks = c("CDS","ADS","BDS","ODS","PDS","UDS"),
+                    labels = c("Child","Adult","Child & Adult", "Other", "Pet", "unknown"),
+                    values = c("#ff6100","#fff500", "#05fb00", "#33a7c8", "#001eba", "#a538c6")
+                    ) +
+  geom_text(aes(label=ifelse(prop>.04,round(prop,2),'')),
+            position=position_stack(vjust=0.5), size=2) +
+  scale_x_discrete(
+    labels = c(
+      "CI" = "DHH (CI)",
+      "HAM" = "HA Match",
+      "CAM" = "CA Match"))+
+  theme_classic() +
+  theme(text=element_text(size=graph_label_size),
+    legend.key.size = unit(.3, 'cm'),
+    axis.text.x = element_text(angle = graph_label_x_angle, hjust = 1),legend.title = element_text(size = 4), legend.text = element_text(size = 4)) +
+  ylab("Utterance addressee \nprops.") +
+  xlab(NULL)
+```
+
+```{r cds, echo=FALSE}
+#CDS Violin Plot
+CDS_plot <- make_tricomparison(
+  data = xds_props %>% filter(addressee == "CDS"),
+  x_var = "Role",
+  y_var = "prop",
+  group_var = "Role",
+  y_label = "Proportion of\nChild-Directed Speech",
+  title = NULL
+)
+```
+
+```{r automated-plots, echo=FALSE, fig.cap="Measures from Automated LENA analysis.", fig.pos='h'}
+awc_line_plot <- make_agegroup_plot(
+  data = HI_LENA_counts,
+  y_var = "AWC_per_hour",
+  y_label = "AWC (per hour)",
+  title = NULL
+)
+
+ctc_line_plot <- make_agegroup_plot(
+  data = HI_LENA_counts,
+  y_var = "CTC_per_hour",
+  y_label = "CTC (per hour)",
+  title = NULL
+)
+
+cvc_line_plot <- make_agegroup_plot(
+  data = HI_LENA_counts,
+  y_var = "CVC_per_hour",
+  y_label = "CVC (per hour)",
+  title = NULL
+)
+
+auto_legend <- get_legend(cvc_line_plot + theme(legend.box.margin = margin(0, 0, 0, 12)))
+
+cowplot::plot_grid(awc_line_plot+theme(legend.position = "none"), ctc_line_plot+theme(legend.position = "none"), cvc_line_plot+theme(legend.position = "none"), auto_legend, ncol=2)
+```
+
+### Language Exposure Measures
+
+Total Word Count based on the manual annotations for each recording. This value is a count of all individual words produced by speakers other than the target child. Words were defined as strings separated by spaces in the transcription.
+
+Each manually-coded utterance was annotated for its addressee: child, adult, both children and adults, a pet, other (e.g., virtual assistants, higher powers, themselves), or unknown addressee. While the annotation scheme does not distinguish speech directed to the target child from that directed to other children, looking at speech directed to adults, pets, and others allows for an estimation of the proportion of *types* of speech each group is exposed to, (i.e., child directed speech vs. overheard speech). We calculated the overall proportion of speech directed to each category.
+
+To more closely estimate the overall quantity, we calculated these measures only in the 30 randomly-sampled minutes of transcription, not the 10 minutes selected for high-density talk.
+
+```{r mwc, echo=FALSE}
+MWC_plot <- bicomparison(
+  data = manual_word_tokens,
+  x_var = "HearingStatus",
+  y_var = "MWC_per_hour",
+  y_label = "Total Word Count \n(per hour)"
+)
+
+CDS_MWC_plot <- make_tricomparison(
+  data = CDS_manual_word_tokens,
+  x_var = "Role",
+  y_var = "MWC_per_hour",
+  group_var = "Role",
+  y_label = "CDS-only Word Count (per hour)"
+)
+```
+
+```{r langex-plot, echo=FALSE, fig.cap="Language exposure measures.", fig.pos='h'}
+
+cds_line_plot <- make_agegroup_plot(
+  data = xds_props %>% filter(addressee == "CDS"),
+  y_var = "prop",
+  y_label = "Proportion of\nChild-Directed Speech",
+  title = NULL
+)
+
+MWC_line_plot <- make_agegroup_plot(data = manual_word_tokens,
+  y_var = "MWC_per_hour",
+  y_label = "Total Word Count \n(per hour)",
+  uses_hivol = FALSE,
+  title = NULL)
+
+langex_legend <- get_legend(MWC_line_plot + theme(legend.box.margin = margin(0, 0, 0, 12)))
+
+langex_title <- cowplot_title("Language Exposure")
+cowplot::plot_grid(MWC_plot, addressee_props_plot, NULL, MWC_line_plot + theme(legend.position = "none"), cds_line_plot + theme(legend.position = "none"), langex_legend, ncol = 3, rel_widths = c(1,1,.4))
+
+  
+```
+
+Language exposure was broadly quite similar between the CI group and each hearing match group. Because manual word count did not vary across age for typically-hearing participants (`r check_age_correlation(manual_word_tokens, "MWC_per_hour")`), we collapsed the CAM and HAM groups for the word count analysis. Results of the Wilcoxon test showed no significant difference in overall word count between the cochlear implant group and their typically-hearing matches (`r report_group_means(manual_word_tokens, "MWC_per_hour", "CI")`, `r report_group_means(manual_word_tokens, "MWC_per_hour", "Hearing")`, `r report_wilcox(df = manual_word_tokens, variable_col = "MWC_per_hour")`).
+
+For the proportion of child-directed speech, we observed a significant correlation with age among the typically-hearing participants, so we ran a linear model with age and group as predictors (`r check_age_correlation(xds_props_wide, "prop_CDS")`). This model does not significantly explain the variance in the proportion of child-directed speech (`r report_lm(xds_props_wide, "prop_CDS", report_type = "all")`). Based on visual inspection of \@ref(fig:langex-plot), it seems like the proportion of child-directed speech might increase for typically-hearing children but not DHH children, but as seen in the graph, the proportion of child-directed speech shows wide individual variability, and our analysis does not yield any conclusions. statistical comparisons of other addressee proportions were not performed, as child-directed speech was the primary variable being investigated.
+
+### Audibility Measures
+
+```{r unintelligibility, echo=FALSE}
+unintelligible_calculation <- unwrangled_HI_LENA  %>%
+  mutate(VIHI_ID = substr(VIHI_ID, 1, 10)) %>% #Clip off the ".eaf" so that it'll match with the demographics file
+  get_match_number() %>% #Get triplet and CI/HA/CA from demographics file
+  filter(!is.na(Role)) %>% #If there's no role, the speaker is not a CI/HA/CA kid. They're probably a TD VI match inadvertently included here
+  filter(sampling_type == "random") %>%  #Removing all HiVol so that we have even sample sizes for the poster. Be sure to remove in the future!
+  filter(speaker != "EE1", speaker != "CHI", speaker != "rep@CHI", speaker != "fun@CHI" , speaker != "pro@CHI") %>% # remove CHI utts and electronic noise
+  mutate(has_unintelligible = case_when(grepl("xxx", utterance) ~ 1, .default = 0)) %>% 
+  group_by(VIHI_ID) %>% 
+  summarise(
+    utts = n(),
+    unint_utts = sum(has_unintelligible),
+    prop_unint = unint_utts/utts
+  ) %>%
+  get_match_number()
+
+unint_plot <- bicomparison(
+  data = unintelligible_calculation,
+  y_var = "prop_unint",
+  y_label = "Prop. unintelligible utts.",
+  title = NULL,
+)
+
+
+```
+
+```{r overlapping, echo=FALSE}
+#Using ELAN output to figure out how much overlapping speech we have!
+
+#This CSV is a little bit broken; further explanation below
+HITD_slices <- read.csv(file=data_dir / "sliced_HITD_jan24_2025.txt", sep="\t", header=TRUE, na.strings=c("","NA")) %>% 
+  #select(!X) %>% #Drop empty column - Unclear why this exists in LENA output #jan 25 did not appear
+  select(!context & !code & !code_num & !sampling_type & !on_off & !con) %>% #getting rid of metadata transcription tiers that don't count as speakers
+  mutate(File = str_replace_all(File, "\\..*$", "")) %>% #Remove file extension to get VIHI_ID
+  rename(VIHI_ID = File) %>%
+  get_match_number() %>% 
+  filter(!is.na(Triplet_num)) #Remove VI TD matches included in file
+
+
+durations <- HITD_slices %>%
+  group_by(VIHI_ID) %>% 
+  summarise(dur = sum(Duration...msec))
+
+overlap_props <- HITD_slices %>% 
+  rowwise() %>% 
+  mutate(active_speakers = sum(!is.na(c_across(4:42)))) %>% #Columns for speaker tiers
+  filter(active_speakers > 1) %>% 
+  group_by(VIHI_ID) %>% 
+  summarise(dur_overlap = sum(Duration...msec)) %>% 
+  full_join(durations, by=join_by(VIHI_ID)) %>% 
+  mutate(prop_overlap = dur_overlap/dur) %>% 
+  get_match_number()
+
+overlap_props <- overlap_props %>%
+  mutate(prop_overlap = replace_na(prop_overlap, 0)) %>% 
+  mutate(dur_overlap = replace_na(dur_overlap, 0))
+
+overlap_plot <- bicomparison(
+  data = overlap_props,
+  y_var = "prop_overlap",
+  y_label = "Prop. Overlapping \nspeech"
+)
+
+
+```
+
+```{r lena_quality, echo=FALSE}
+NON_plot <- bicomparison(
+  data = HI_LENA_counts,
+  y_var = "NON_prop",
+  y_label = "Proportion of Nonspeech Noise",
+  title = NULL,
+)
+
+TVN_plot <- bicomparison(
+  data = HI_LENA_counts,
+  y_var = "TVN_prop",
+  y_label = "Proportion of TV/Media Noise",
+  title = NULL,
+)
+
+OLN_plot <- bicomparison(
+  data = HI_LENA_counts,
+  y_var = "OLN_prop",
+  y_label = "Prop. of Overlapping \nSound",
+  title = NULL,
+)
+```
+
+```{r speech_rate, echo=FALSE}
+speech_rates <- cleaned_input_utts %>% 
+  filter(!grepl("xxx", utterance)) %>% 
+  mutate(word_count = str_count(utterance_clean, pattern = " ") + 1) %>% #Number of words = number of spaces + 1
+  mutate(words_per_second = word_count/(duration_msec/1000)) %>%
+  group_by(VIHI_ID) %>% 
+  summarise(speech_rate = mean(words_per_second)) %>% 
+  get_match_number()
+
+CDS_speech_rates <- cleaned_input_utts %>% 
+  filter(xds == "C") %>% 
+  filter(!grepl("xxx", utterance)) %>% 
+  mutate(word_count = str_count(utterance_clean, pattern = " ") + 1) %>% #Number of words = number of spaces + 1
+  mutate(words_per_second = word_count/(duration_msec/1000)) %>%
+  group_by(VIHI_ID) %>% 
+  summarise(speech_rate = mean(words_per_second)) %>% 
+  get_match_number()
+
+SPR_plot <- bicomparison(
+  data = speech_rates,
+  y_var = "speech_rate",
+  y_label = "Words per second",
+  title = NULL,
+)
+
+CDS_SPR_plot <- make_tricomparison(
+  data = CDS_speech_rates,
+  x_var = "Role",
+  y_var = "speech_rate",
+  group_var = "Role",
+  y_label = "CDS words per second",
+  title = NULL,
+)
+```
+
+```{r audibility-plot, echo=FALSE, fig.cap="Audibility measures.", fig.pos='h'}
+overlap_line_plot <-make_agegroup_plot(
+  data = overlap_props,
+  y_var = "prop_overlap",
+  y_label = "Prop. Overlapping \nspeech"
+)
+
+wps_line_plot <-make_agegroup_plot(
+  data = CDS_speech_rates,
+  x_var = "Age",
+  y_var = "speech_rate",
+  group_var = "HearingStatus",
+  y_label = "Words per second",
+  title = NULL,
+)
+
+unint_line_plot <- make_agegroup_plot(
+  data = unintelligible_calculation,
+  y_var = "prop_unint",
+  y_label = "Prop. unintelligible \n utts.",
+  title = NULL,
+)
+
+audibility_title <- cowplot_title("Input Audibility")
+aud_legend <- get_legend(unint_line_plot + theme(legend.box.margin = margin(0, 0, 0, 12)))
+
+aud_sin_leg <-cowplot::plot_grid(SPR_plot, unint_plot, overlap_plot, wps_line_plot+ theme(legend.position = "none"), unint_line_plot+ theme(legend.position = "none"), overlap_line_plot+ theme(legend.position = "none"), aud_legend, nrow=3, ncol=2)
+
+cowplot::plot_grid(aud_sin_leg, aud_legend, nrow = 1, rel_widths = c(1, .3))
+
+```
+
+In addition to automated audibility analyses, we computed three measures of input audibility based on the manual annotations. First, "Words per Second" measures the average rate of speech in the child's auditory environment. For each utterance, the number of words was divided by the duration of the utterance in seconds. These values were then averaged across all of the utterances in each recording. Utterances containing unintelligible speech were excluded from this calculation.
+
+Second, we calculated the proportion of utterances containing speech deemed unintelligible. We note that this measure relied on the determination of intelligibility by an adult, typically-hearing listener listening to a recording and is thus an imperfect (though potentially still useful) proxy. That is, whether speech was or wasn't intelligible to the child cannot be captured, and this measure likely differs from the child's experience in several ways. First, though the child wore the recorder, the physical conditions of the the recorder differ from the child's own ears and cochlear implants (e.g. could be muffled by their shirt when the child is being held). Second, for DHH children, we have no indicator of the acoustic quality of each utterance as it was processed through their cochlear implant. This measure is a proxy for identifying utterances that are far away, muffled, rapid, or obscured by competing sound and are more likely to be difficult for a language learner to process.
+
+Finally, we calculated the proportion of overlapping speech in the manual transcription. Each utterance has an onset and offset time. When two or more utterances overlap in time, we count the overlapping duration towards the total amount of overlapping speech in the transcribed regions of the file. We report the proportion here as the summed duration of overlapping speech divided by the length of the recording.
+
+Next, we investigated whether parents of children with cochlear implants might try to make speech more audible by slowing speech down (speech rate), speaking louder or more clearly (proportion of unintellible utterances), or reducing contexts where there are multiple speakers (proportion of overlapping utterances).
+
+Because speech rate did not vary across age for typically-hearing participants (`r check_age_correlation(speech_rates, "speech_rate")`), we collapsed the CAM and HAM groups for the speech rate analysis. Results of the Wilcoxon test showed no significant difference in speech rate between the cochlear implant group and their typically-hearing matches (`r report_group_means(speech_rates, "speech_rate", "CI")`, `r report_group_means(speech_rates, "speech_rate", "Hearing")`, `r report_wilcox(df = speech_rates, variable_col = "speech_rate")`). The proportion of unintelligible utterances also did not vary across age for typically-hearing participants (`r check_age_correlation(unintelligible_calculation, "prop_unint")`), so we again collapsed the CAM and HAM groups for the proportion of unintelligible utterances analysis. Results of the Wilcoxon test showed no significant difference in proportion of unintelligible utterances between the cochlear implant group and their typically-hearing matches (`r report_group_means(unintelligible_calculation, "prop_unint", "CI")`, `r report_group_means(unintelligible_calculation, "prop_unint", "Hearing")`, `r report_wilcox(df = unintelligible_calculation, "prop_unint")`).
+
+Finally, since the proportion of overlapping utterances did not vary across age for typically-hearing participants (`r check_age_correlation(overlap_props, "prop_overlap")`), we ran a Wilcoxon test comparing the amount of overlap in the input to typically-hearing children versus to children with cochlear implants. The two groups did not differ (`r report_group_means(overlap_props, "prop_overlap", "CI")`, `r report_group_means(overlap_props, "prop_overlap", "Hearing")`, `r report_wilcox(df = overlap_props, "prop_overlap")`).
+
+### Complexity Measures
+
+We calculated Mean Length of Utterance, quantified as the mean number of morphemes per utterance in the speech input. Utterances' morpheme counts were parsed and counted using the `morphemepiece` package in R [@bratt2022]. We excluded utterances containing unintelligible speech.
+
+We also calculated Type-Token Ratio to analyze the amount of lexical variety in each child's input. This measure was computed by "chunking" the input speech into 100-word bins across each group, then calculating the proportion of unique words out of the 100 in each bin. These uniqueness values were then averaged to produce a single value for Type-Token Ratio for each recording. Normalizing the denominator allows for a measure of lexical diversity that is less coupled with the raw quantity of speech in the input [@campbell2025; @montag2018].
+
+```{r mlu, echo=FALSE}
+MLUs <-
+  cleaned_input_utts %>%
+  filter(!grepl("xxx", utterance)) %>% #These utterances contain unknown numbers of morphemes
+  mutate(morphemecount = lengths(morphemepiece_tokenize(utterance_clean))) %>%
+  #left_join((cleaned_input_utts %>% dplyr::select(-group))) %>%
+  select(VIHI_ID, Role, speaker, xds, utterance_clean, morphemecount) %>%
+  filter(!is.na(utterance_clean)) %>%
+  group_by(Role, VIHI_ID) %>%
+  summarise(MLU = mean(morphemecount)) %>%
+ungroup() %>%
+    mutate(HearingStatus = case_when(Role == "HAM" | Role == "CAM" ~ "Hearing",
+                                     Role == "CI" ~ "CI")) %>%
+  left_join((HI_demographics %>% select(Age, VIHI_ID)))
+
+MLU_plot <- bicomparison(
+  data = MLUs %>% filter(MLU > 0),
+  y_var = "MLU",
+  y_label = "MLU\n(morphemes)",
+  uses_hivol = TRUE,
+  title = NULL,
+  y_axis_start=2
+)
+
+CDS_MLUs <- cleaned_input_utts %>%
+  filter(!grepl("xxx", utterance)) %>% #These utterances contain unknown numbers of morphemes
+  mutate(morphemecount = lengths(morphemepiece_tokenize(utterance_clean))) %>%
+  #left_join((cleaned_input_utts %>% dplyr::select(-group))) %>%
+  select(VIHI_ID, Role, speaker, xds, utterance_clean, morphemecount) %>%
+  filter(!is.na(utterance_clean)) %>%
+  filter(xds == "C") %>% 
+  group_by(Role, VIHI_ID) %>%
+  summarise(CDS_MLU = mean(morphemecount))
+
+CDS_MLU_plot <- make_tricomparison(
+  data = CDS_MLUs %>% filter(CDS_MLU > 0),
+  x_var = "Role",
+  y_var = "CDS_MLU",
+  group_var = "Role",
+  y_label = "CDS-only MLU\n",
+  uses_hivol = TRUE,
+  title = NULL,
+  y_axis_start=2
+)
+
+```
+
+```{r ttr, echo=FALSE}
+TTR_calculations <- HITD_LENA_words %>%
+  filter(Word != "0",
+         speaker != "CHI",
+         speaker != "EE1") %>%
+  group_by(VIHI_ID) %>%
+   mutate(bin = rep(1:ceiling(n() / 100), each = 100)[1:n()]) %>%
+  group_by(VIHI_ID, bin) %>%
+  summarise(
+    num_words_in_bin = n(),
+    num_unique_words = n_distinct(Word),
+    ttr = num_unique_words / num_words_in_bin
+  ) %>%
+  group_by(VIHI_ID) %>%
+  summarise(num_bins = n(),
+            mean_ttr = mean(ttr)) %>%
+  get_match_number()
+
+CDS_TTR_calculations <- HITD_LENA_words %>%
+  filter(Word != "0",
+         speaker != "CHI",
+         speaker != "EE1",
+         xds == "C") %>%
+  group_by(VIHI_ID) %>%
+   mutate(bin = rep(1:ceiling(n() / 100), each = 100)[1:n()]) %>%
+  group_by(VIHI_ID, bin) %>%
+  summarise(
+    num_words_in_bin = n(),
+    num_unique_words = n_distinct(Word),
+    ttr = num_unique_words / num_words_in_bin
+  ) %>%
+  group_by(VIHI_ID) %>%
+  summarise(num_bins = n(),
+            mean_ttr = mean(ttr)) %>%
+  get_match_number()
+
+TTR_plot <- bicomparison(
+  data = TTR_calculations,
+  y_var = "mean_ttr",
+  y_label = "Type-Token Ratio:\nUnique / Total Words",
+  uses_hivol = TRUE,
+  title = NULL,
+  y_axis_start = 0.4
+)
+
+CDS_TTR_plot <- make_tricomparison(
+  data = CDS_TTR_calculations,
+  x_var = "Role",
+  y_var = "mean_ttr",
+  group_var = "Role",
+  y_label = "CDS-Only Type-Token Ratio",
+  uses_hivol = TRUE,
+  title = NULL,
+  y_axis_start = 0.4
+)
+```
+
+```{r complexity-plot, echo=FALSE, fig.cap="Input complexity measures.", fig.pos='h'}
+mlu_line_plot <- make_agegroup_plot(data = MLUs %>% filter(MLU > 0),
+  y_var = "MLU",
+  y_label = "MLU\n(morphemes)",
+  uses_hivol = TRUE,
+  title = NULL,
+  y_axis_start=1)
+
+ttr_line_plot <- make_agegroup_plot(data = TTR_calculations,
+  y_var = "mean_ttr",
+  y_label = "TTR",
+  uses_hivol = TRUE,
+  title = NULL)
+
+complex_legend <- get_legend(ttr_line_plot + theme(legend.box.margin = margin(0, 0, 0, 12)))
+
+complex_sin_leg <-cowplot::plot_grid(MLU_plot, TTR_plot, mlu_line_plot+ theme(legend.position = "none"), ttr_line_plot+ theme(legend.position = "none"), nrow=2)
+
+cowplot::plot_grid(complex_sin_leg, complex_legend, nrow=1, rel_widths = c(1,.3))
+
+```
+
+Neither MLU (`r check_age_correlation(MLUs, "MLU")`) nor type-token ratio (`r check_age_correlation(TTR_calculations, "mean_ttr")`) varied by age in the typically-hearing participants, so for both analyses, we collapsed the two typically-hearing subgroups. We found that MLU was higher for language input to typically-hearing infants (`r report_group_means(MLUs, "MLU", "CI")`, `r report_group_means(MLUs, "MLU", "Hearing")`, `r report_wilcox(MLUs, "MLU")`). Type-token ratio did not differ by group (`r report_group_means(TTR_calculations, "mean_ttr", "CI")`, `r report_group_means(TTR_calculations, "mean_ttr", "Hearing")`, `r report_wilcox(TTR_calculations, "mean_ttr")`).
+
+### Conceptual Measures
+
+We determined the temporality of each utterance following the procedure in @campbell2025. To calculate this, we used the R package `udpipe` [@wijffels] to tag the first verb in each utterance with tense and mood features to determine the temporal quality of each utterance. Past tense, going to/want to/got to, and modal verbs were classified as decontextualized utterances, and present tense and gerunds were classified as present utterances. Fragments and other utterances for which no temporality features were tagged were left unclassified. For more discussion of the benefits and limitations of this analysis, see @campbell2025.
+
+```{r displacement_props, echo=FALSE, cache=TRUE}
+#Make sure to update every time we export new data. Last updated: Jan 24 2025
+
+udpipe_english <- udpipe_download_model(language = "english") # download the udpipe english model
+udmodel_english <-
+  udpipe_load_model(file = udpipe_english$file_model)
+
+
+verbs_only <- udpipe_annotate(udmodel_english, # apply the udpipe model to the cleaned utterances. this should give us syntactic parsing (not perfect, but as we see later down, pretty similar to human raters)
+   x = cleaned_input_utts$utterance_clean,
+   doc_id = cleaned_input_utts$VIHI_ID) %>%
+as.data.frame() %>%
+filter(
+    xpos %in% c("VB", "VBD", "VBP", "VBN", "VBG", "VBZ", "AUX", "MD"), # filter to verbs only
+    token != "=!" &
+      token != "xxx"
+    ) %>%
+  distinct(doc_id, paragraph_id, sentence_id, .keep_all = TRUE) %>%
+  mutate(
+    temporality = case_when( # this is based on EC & LR's top-down judgments of how to categorize #words based on tense
+      grepl('Tense=Past', feats) ~ "displaced",
+      grepl('Mood=Imp', feats) ~ "ambiguous",
+      xpos == "MD" ~ "displaced",
+      grepl('gonna', sentence) |
+        grepl('gotta', sentence) |
+        grepl('wanna', sentence) |
+        grepl('going to', sentence) |
+        grepl('got to', sentence) |
+        grepl('want to', sentence) |
+        grepl('have to', sentence) | grepl("\\bif\\b", sentence) ~ "displaced",
+      grepl('Mood=Ind', feats) &
+        grepl('Tense=Pres', feats) |
+        grepl('VerbForm=Ger', feats) ~ "present",
+      TRUE ~ "ambiguous"
+    )
+  )
+#write_csv(verbs_only, data_dir / "LENA/verbs_only.csv")
+```
+
+```{r temporality_analysis, echo = FALSE}
+temporality_props_wide <- verbs_only %>%
+  dplyr::rename(VIHI_ID = doc_id) %>%
+  group_by(VIHI_ID) %>%
+  summarize(
+    verb_utt_count = n(), # calculate proportions by verb tense out of total utterances
+    prop_displaced = (sum(temporality == "displaced") / verb_utt_count),
+    prop_present =  (sum(temporality == "present") / verb_utt_count),
+    prop_ambiguous = (sum(temporality == "ambiguous") /
+                            verb_utt_count)
+  ) %>%
+  mutate(group = as.factor(str_sub(VIHI_ID, 1, 2))) %>%
+  get_match_number()
+
+temporality_props <- temporality_props_wide %>%
+  pivot_longer(
+    cols = prop_displaced:prop_ambiguous,
+    names_to = "verb_temporality",
+    names_prefix = "prop_",
+    values_to = "prop"
+  )
+
+temporality_props_plot <- temporality_props %>%
+  group_by(Role, verb_temporality) %>%
+  summarise(prop = mean(prop, na.rm = TRUE)) %>%
+  ggplot(aes(fill = factor(verb_temporality, levels=c("ambiguous","displaced","present")),
+                                 y = prop,
+                                 x = Role)) +
+  geom_bar(position = "stack", stat = "identity")  +
+  ylab ("Utterance verb \ntemporality props.") +
+   geom_text(aes(label=round(prop,2)),
+            position=position_stack(vjust=0.5), size=2) +
+  theme_classic() +
+  theme(text = element_text(size = graph_label_size),
+    legend.key.size = unit(.3, 'cm'),
+        axis.text.x = element_text(angle = graph_label_x_angle, hjust = 1),legend.title = element_text(size = 4), legend.text = element_text(size = 4)) +
+  scale_fill_manual(name="Verb Tense",
+                    labels=c("ambiguous", "displaced", "present"),
+                    values=c("#A5ACA5","#fff500", "#ff6100"))+
+  scale_x_discrete(
+    labels = c(
+      "CI" = "DHH (CI)",
+      "HAM" = "HA Match",
+      "CAM" = "CA Match"))+
+  xlab(NULL)
+```
+
+```{r displaced, echo=FALSE}
+displaced_plot <- make_tricomparison(
+  data = temporality_props_wide,
+  x_var = "Role",
+  y_var = "prop_displaced",
+  uses_hivol = TRUE,
+  group_var = "Role",
+  y_label = "Proportion of Displaced Verbs",
+)
+```
+
+```{r conceptual-plot, echo=FALSE, fig.cap="Conceptual Measures.", fig.pos = 'h'}
+
+temporality_line_plot <- make_agegroup_plot(data = temporality_props_wide,
+  y_var = "prop_displaced",
+  y_label = "Proportion of\nTemporally Displaced Verbs",
+  uses_hivol = TRUE,
+  title = NULL)
+
+concept_legend <-get_legend(temporality_line_plot + theme(legend.box.margin = margin(0, 0, 0, 12)))
+
+cowplot::plot_grid(temporality_props_plot, NULL, temporality_line_plot+ theme(legend.position = "none"), concept_legend, nrow=2, rel_widths = c(1, .3))
+
+```
+
+Verb temporality did not differ across age for our typically-hearing participants (`r check_age_correlation(temporality_props_wide, "prop_present")`), so we collapsed the hearing groups together. Language input to the CI group contained a slightly lower proportion of temporally *present* utterances (`r report_group_means(temporality_props_wide, "prop_present", "CI")`, `r report_group_means(temporality_props_wide, "prop_present", "Hearing")`, `r report_wilcox(temporality_props_wide, "prop_present")`) but a similar amount of temporally displaced utterances (`r report_group_means(temporality_props_wide, "prop_displaced", "CI")`, `r report_group_means(temporality_props_wide, "prop_displaced", "Hearing")`, `r report_wilcox(temporality_props_wide, "prop_displaced")`).
+
+### Relationship between input and language outcomes
+
+We finally conducted two additional linear models, looking at both automated measures and measures from manually-annotated measures. For automated measures, we examined the effect of AWC on Child Vocalization Count, a numerical estimate expressed by the LENA software of the number of utterances produced by the child. For manual measures, we correlated Manual word Count and the proportion of the target child's utterances that were classified as canonical babbling (which includes lexical utterances).
+
+```{r chi-voc-plots, echo=FALSE, fig.cap="Input-Outcome relationships.", fig.pos='h', fig.height="6", out.height="100%"}
+CVC_line_plot <- make_agegroup_plot(data = HI_LENA_counts,
+  y_var = "CVC_per_hour",
+  y_label = "CVC\n(per hour)",
+  uses_hivol = FALSE,
+  title = NULL)
+
+prop_can_line_plot <- make_agegroup_plot(data = adult_baby_manual_quant,
+  y_var = "prop_canonical",
+  y_label = "Prop. canonical \n vocs. by child",
+  uses_hivol = FALSE,
+  title = NULL)
+
+outcomes_LENA_graph <-
+  ggplot(data = HI_LENA_counts, aes(x = AWC_per_hour, y = CVC_per_hour, group = HearingStatus, color = HearingStatus, fill = HearingStatus)) + 
+    geom_point(aes(shape = Role, color = HearingStatus, fill = HearingStatus)) +
+    geom_smooth(method="lm")+
+    theme_classic() +
+    labs(y = "CVC \n(per hour)", x = "AWC\n(per hour)", title = NULL, element_text(size = 15)) +
+    theme(
+      legend.title = element_blank(),
+      legend.position = "none",
+      axis.text.x = element_text(angle = graph_label_x_angle, hjust = 1),
+      text = element_text(size = graph_label_size)
+    ) +
+    scale_color_manual(
+      breaks = levels(HI_LENA_counts$HearingStatus),
+      labels = c("CI", "Hearing"),
+      values = c("#CE4257", "#FF9B54")
+    ) +
+    scale_fill_manual(
+      breaks = levels(HI_LENA_counts$HearingStatus),
+      labels = c("CI", "Hearing"),
+      values = c("#CE4257", "#FF9B54") 
+    ) +
+    scale_shape(solid=TRUE
+    ) +
+  stat_cor(color = c("#870611", "#C25C18"), position="dodge")
+
+CXC_graph <-
+  ggplot(data = HI_LENA_counts, aes(x = CTC_per_hour, y = CVC_per_hour, group = HearingStatus, color = HearingStatus, fill = HearingStatus)) + 
+    geom_point(aes(shape = Role, color = HearingStatus, fill = HearingStatus)) +
+    geom_smooth(method="lm")+
+    theme_classic() +
+    labs(y = "CVC\n(per hour)", x = "CTC\n(per hour)", title = NULL, element_text(size = 15)) +
+    theme(
+      legend.title = element_blank(),
+      legend.position = "none",
+      axis.text.x = element_text(angle = graph_label_x_angle, hjust = 1),
+      text = element_text(size = graph_label_size)
+    ) +
+    scale_color_manual(
+      breaks = levels(HI_LENA_counts$HearingStatus),
+      labels = c("CI", "Hearing"),
+      values = c("#CE4257", "#FF9B54")
+    ) +
+    scale_fill_manual(
+      breaks = levels(HI_LENA_counts$HearingStatus),
+      labels = c("CI", "Hearing"),
+      values = c("#CE4257", "#FF9B54") 
+    ) +
+    scale_shape(solid=TRUE
+    )
+
+
+outcomes_manual_graph <- ggplot(data = adult_baby_manual_quant, aes(x = MWC_per_hour, y = prop_canonical, group = HearingStatus, color = HearingStatus, fill = HearingStatus)) + 
+    geom_point(aes(shape = Role, color = HearingStatus, fill = HearingStatus)) +
+    geom_smooth(method="lm")+
+    theme_classic() +
+    labs(y = "Prop. canonical \n utterances by child", x = "Manual adult word count", title = NULL, element_text(size = 15)) +
+    theme(
+      legend.title = element_blank(),
+      legend.position = "none",
+      axis.text.x = element_text(angle = graph_label_x_angle, hjust = 1),
+      text = element_text(size = graph_label_size)
+    ) +
+    scale_color_manual(
+      breaks = levels(HI_LENA_counts$HearingStatus),
+      labels = c("CI", "Hearing"),
+      values = c("#CE4257", "#FF9B54")
+    ) +
+    scale_fill_manual(
+      breaks = levels(HI_LENA_counts$HearingStatus),
+      labels = c("CI", "Hearing"),
+      values = c("#CE4257", "#FF9B54") 
+    ) +
+    scale_shape(solid=TRUE) +
+    stat_cor(color = c("#870611", "#C25C18"), position="dodge")
+
+in_lex_graph <- ggplot(data = adult_baby_manual_quant, aes(x = MWC_per_hour, y = prop_lexical, group = HearingStatus, color = HearingStatus, fill = HearingStatus)) + 
+    geom_point(aes(shape = Role, color = HearingStatus, fill = HearingStatus)) +
+    geom_smooth(method="lm")+
+    theme_classic() +
+    labs(y = "Prop. lexical \n utterances by child", x = "Manual adult word count", title = NULL, element_text(size = 15)) +
+    theme(
+      legend.title = element_blank(),
+      legend.position = "none",
+      axis.text.x = element_text(angle = graph_label_x_angle, hjust = 1),
+      text = element_text(size = graph_label_size)
+    ) +
+    scale_color_manual(
+      breaks = levels(HI_LENA_counts$HearingStatus),
+      labels = c("CI", "Hearing"),
+      values = c("#CE4257", "#FF9B54")
+    ) +
+    scale_fill_manual(
+      breaks = levels(HI_LENA_counts$HearingStatus),
+      labels = c("CI", "Hearing"),
+      values = c("#CE4257", "#FF9B54") 
+    ) +
+    scale_shape(solid=TRUE)
+outcomes_legend <- get_legend(CVC_line_plot + theme(legend.box.margin = margin(0, 0, 0, 12)))
+
+iisl <- cowplot::plot_grid(babble_plot, CVC_plot, outcomes_LENA_graph, outcomes_manual_graph, CVC_line_plot+theme(legend.position = "none"), prop_can_line_plot+theme(legend.position = "none"), nrow=3, labels = NULL)
+
+cowplot::plot_grid(iisl, outcomes_legend, nrow = 1, rel_widths = c(1,.3))
+```
+
+```{r models, echo=FALSE, results='asis'}
+AWC_CVC_model <- lm(CVC_per_hour ~ Age + AWC_per_hour+ HearingStatus + AWC_per_hour:HearingStatus, data = HI_LENA_counts)
+
+MWC_canonical_model <- lm(prop_canonical ~ Age + MWC_per_hour*HearingStatus, data = adult_baby_manual_quant) 
+
+MWC_lexical_model <- lm(prop_lexical ~ Age + MWC_per_hour*HearingStatus, data = adult_baby_manual_quant)
+
+
+get_predictor_stats <- function(model, predictor_number, round=2) {
+  coef_table <- summary(model)$coefficients
+  if (predictor_number > nrow(coef_table)) {
+    stop("Predictor number exceeds number of terms in the model.")
+  }
+
+  beta <- coef_table[predictor_number, "Estimate"]
+  p <- coef_table[predictor_number, "Pr(>|t|)"]
+
+  beta_str <- printnum(beta, digits=round)
+  p_str <- printp(p, add_equals = TRUE)
+
+  result <- sprintf("*Beta* = %s, *p* %s", beta_str, p_str)
+  return(result)
+}
+
+get_model_stats <- function(model) {
+  lm_summary <- summary(model)
+  r2 <- sprintf("%.2f", lm_summary$adj.r.squared)
+
+  f_stat <- lm_summary$fstatistic
+  f_val <- sprintf("%.2f", f_stat["value"])
+  df1 <- f_stat["numdf"]
+  df2 <- f_stat["dendf"]
+  p_model <- pf(f_stat["value"], df1, df2, lower.tail = FALSE)
+  p_str <- printp(p_model, add_equals = TRUE)
+
+  result <- sprintf("*R*^2^~adjusted~ = %s, *p* %s",r2, p_str)
+  return(result)
+}
+
+```
+
+Lastly, we measured whether characteristics of children's language *input* predicted their language *output*. We focused just on the relationship between parent input quantity and child input quantity / maturity, instead of testing each of the input variables above, but interested readers can access our data at OSF [link] and test other possible links. For this analysis, we created models predicting children's language productions, with main effects of Age, Hearing Status, and input variable, and an interaction between that input variable and hearing status.
+
+We started by looking at Child Vocalization Count \~ Age + AdultWordCount~Manual~ + HearingStatus + AdultWordCount~LENA~:HearingStatus. This model significantly predicted \~18% of the variance in child vocalization count (`r get_model_stats(AWC_CVC_model)`). As expected, older children produced more vocalization counts (`r get_predictor_stats(AWC_CVC_model, 2)`), but we did not find significant effects of group (`r get_predictor_stats(AWC_CVC_model, 4)`), amount of adult words in the input (by the LENA automated count) (`r get_predictor_stats(AWC_CVC_model, 3)`), or the interaction between adult word count and group. (`r get_predictor_stats(AWC_CVC_model, 5)`).
+
+Next, we analyzed whether the proportion of canonical utterances in the child's speech was predicted by Count \~ Age + AdultWordCount~Manual~ + HearingStatus + AdultWordCount~Manual~:HearingStatus. This model significantly predicted \~59% of the variance in child vocalization count (`r get_model_stats(MWC_canonical_model)`). As expected, older children produced more canonical utterances (`r get_predictor_stats(MWC_canonical_model, 2)`). We also observed that hearing children produced a higher proportion of canonical utterances (`r get_predictor_stats(MWC_canonical_model, 4, round=3)`), and children who were exposed to more words produced a higher proportion of canonical utterances (`r get_predictor_stats(MWC_canonical_model, 3, round=4)`). We did not find an interaction between adult word count and group (`r get_predictor_stats(MWC_canonical_model, 5, round=3)`).
+
+Lastly, we analyzed whether the proportion of *lexical* utterances in the child's speech was predicted by Age + AdultWordCount~Manual~ + HearingStatus + AdultWordCount~Manual~:HearingStatus. This model significantly predicted \~67% of the variance in child vocalization count (`r get_model_stats(MWC_lexical_model)`). As expected, older children produced more lexical utterances (`r get_predictor_stats(MWC_lexical_model, 2, round=3)`). We also observed that hearing children produced a higher proportion of lexical utterances (`r get_predictor_stats(MWC_lexical_model, 4)`), and children who were exposed to more words produced a higher proportion of lexical utterances (`r get_predictor_stats(MWC_lexical_model, 3, round=4)`). There was no interaction of adult word count and group (`r get_predictor_stats(MWC_lexical_model, 5,round=4)`).

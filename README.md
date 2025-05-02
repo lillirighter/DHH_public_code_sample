@@ -4,5 +4,7 @@ This repository examines a corpus of ACLEW transcribed daylong audio recordings 
 
 The goal is to examine the language input to these groups along a variety of measures.
 
-This code is truncated and cleaned for safe public sharing. I acknowledge Alex Emmert and Erin Campbell's contribution to some functions. 
+This code is truncated and cleaned for safe public sharing. I acknowledge Alex Emmert and Erin Campbell's contribution to several functions. 
+
+Contact lilli.righter@gmail.com with questions. 
 
